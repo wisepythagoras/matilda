@@ -35,12 +35,55 @@ const request = require('request');
  */
 
 /**
+ * Convert a template URL to an actual working URL.
+ * @param {string} url The tile server url.
+ * @param {Coords} coords The coordinates.
+ * @returns {string} The modified URL.
+ */
+const templateToUrl = (url, coords) => {
+    // Because the url will basically be a template with the {x}, {y} and {z} strings
+    // in it, we replace those with the actual values.
+    url = url.replace(/{x}/, coords.x);
+    url = url.replace(/{y}/, coords.y);
+    url = url.replace(/{z}/, coords.z);
+
+    return url;
+};
+
+/**
+ * Create a directory.
+ * @param {string} path The path of the directory.
+ * @returns {boolean}
+ */
+const createDir = path => {
+    // Create the directory, only if it doesn't already exist.
+    if (!fs.existsSync(path)) {
+        try {
+            fs.mkdirSync(path);
+        } catch (e) {
+            if (e.code !== 'EEXIST') {
+                return false;
+            }
+        }
+    }
+
+    return true;
+};
+
+/**
+ * Return a generic path error.
+ * @param {string} path The path of the directory.
+ * @returns {Error}
+ */
+const pathError = path => new Error(`Failed to create "${path}"`);
+
+/**
  * Converts a longitude and zoom level into a number.
  * @param {number} lng The longitude.
  * @param {number} zoom The zoom level.
  * @returns {number}
  */
-export const lngToTile = (lng, zoom) => {
+const lngToTile = (lng, zoom) => {
     return (Math.floor((lng + 180) / 360 * Math.pow(2, zoom)));
 };
 
@@ -50,7 +93,7 @@ export const lngToTile = (lng, zoom) => {
  * @param {number} zoom The zoom level.
  * @returns {number}
  */
-export const latToTile = (lat, zoom) => {
+const latToTile = (lat, zoom) => {
     const log = Math.log(
         Math.tan(lat * Math.PI / 180) + 1 /
         Math.cos(lat * Math.PI / 180)
@@ -61,16 +104,16 @@ export const latToTile = (lat, zoom) => {
 
 /**
  * Get the X and Y tile ranges, given the bounding box and the zoom level.
- * @param {number[]} bbox 
+ * @param {number[]} bbox The bounding box.
  * @param {number} zoom The zoom level.
  * @returns {Bounds}
  */
-export const bboxToBounds = (bbox, zoom) => {
+const bboxToBounds = (bbox, zoom) => {
     const bounds = {};
 
-    bounds.north = latToTile(bbox[0], zoom);
+    bounds.south = latToTile(bbox[0], zoom);
     bounds.west = lngToTile(bbox[1], zoom);
-    bounds.south = latToTile(bbox[2], zoom);
+    bounds.north = latToTile(bbox[2], zoom);
     bounds.east = lngToTile(bbox[3], zoom);
 
     return bounds;
@@ -81,13 +124,53 @@ export const bboxToBounds = (bbox, zoom) => {
  * @param {string} url The tile server url.
  * @param {string} output The output directory location.
  * @param {Coords} coords The coordinates.
+ * @param {Function} callback The callback function.
+ * @param {boolean} verbose Self explanatory.
  */
-export const getTile = (url, output, coords) => {
-    // Because the url will basically be a template with the {x}, {y} and {z} strings
-    // in it, we replace those with the actual values.
-    url = url.replace(/{x}/, coords.x);
-    url = url.replace(/{y}/, coords.y);
-    url = url.replace(/{z}/, coords.z);
+const getTile = (url, output, coords, callback, verbose = false) => {
+    // Create the path.
+    let path = `${output}/${coords.z}`;
+
+    // Create the Z path.
+    if (!createDir(path)) {
+        return callback(pathError(path));
+    }
+
+    // Add the X folder to the path.
+    path = `${path}/${coords.x}`;
+
+    // Create the X path.
+    if (!createDir(path)) {
+        return callback(pathError(path));
+    }
+
+    // Compose the path of the image.
+    const image = `${path}/${coords.y}.png`;
+
+    // Check for the image, and if it doesn't exist, create it.
+    if (fs.existsSync(image)) {
+        return callback(null);
+    }
+
+    if (verbose) {
+        console.log(` GET: ${url}`);
+    }
+
+    // Create a write stream.
+    const stream = fs.createWriteStream(image);
+
+    // Handle any errors.
+    stream.on('error', err => {
+        if (verbose) {
+            console.log(err);
+        }
+    });
+
+    // Return to the caller when this finishes.
+    stream.on('finish', callback);
+
+    // Initiate the request.
+    request(url).pipe(stream);
 };
 
 /**
@@ -95,8 +178,8 @@ export const getTile = (url, output, coords) => {
  * @param {Options} options The input options.
  * @param {Function} callback The callback function.
  */
-export const getTiles = (options, callback) => {
-    let tileCount = 0;
+const getTiles = (options, callback) => {
+    let count = 0;
 
     // This will hold all of the coordinate information.
     /** @type {Coords} */
@@ -105,9 +188,81 @@ export const getTiles = (options, callback) => {
     };
 
     // Get the bounds.
-    const bounds = bboxToBounds(options.bbox, coords.z);
+    let bounds = bboxToBounds(options.bbox, coords.z);
 
     // Fill out the rest of the coordinates.
-    coords.x = bounds.east;
+    coords.x = bounds.west;
     coords.y = bounds.south;
+
+    // Get the URL.
+    const url = templateToUrl(options.url, coords);
+
+    // Check if the output directory exists. If it doesn't, create it.
+    if (!createDir(options.output)) {
+        return callback(pathError(options.output));
+    }
+
+    if (!!options.verbose) {
+        console.log(`Server: ${url}`);
+    }
+
+    /**
+     * The callback for the tile getter.
+     * @param {Error} err An error.
+     */
+    const tileGetCallback = err => {
+        if (err) {
+            return callback(err);
+        }
+
+        count++;
+
+        // Increment the Y coords.
+        coords.y++;
+
+        // We scan from north to south. Every time we finish with a row, we move to
+        // the next row (or Y line).
+        if (coords.y <= bounds.north && coords.y >= bounds.south) {
+            getTile(url, options.output, coords, tileGetCallback, options.verbose);
+            return;
+        }
+
+        // Increment the X coords.
+        coords.x++;
+
+        // Reset the Y coords.
+        coords.y = bounds.south;
+
+        // Move to the next column and as long as it's within the selected bounds, we
+        // get that tile.
+        if (coords.x <= bounds.east) {
+            getTile(url, options.output, coords, tileGetCallback, options.verbose);
+            return;
+        }
+
+        // Increment the zoom level and recalculate the bounds.
+        bounds = bboxToBounds(options.bbox, ++coords.z);
+
+        // Set the coords again.
+        coords.x = bounds.west;
+        coords.y = bounds.south;
+
+        // Move one level down. Which means that we zoom in and then download all the
+        // tiles in there.
+        if (coords.z <= options.zoom.max) {
+            return getTile(url, options.output, coords, tileGetCallback, options.verbose);
+        }
+
+        if (!!options.verbose) {
+            console.log(`Downloaded ${count} tiles.`);
+        }
+    };
+
+    // Start fetching the tiles.
+    getTile(url, options.output, coords, tileGetCallback, options.verbose);
 };
+
+module.exports.lngToTile = lngToTile;
+module.exports.latToTile = latToTile;
+module.exports.bboxToBounds = bboxToBounds;
+module.exports.getTiles = getTiles;
