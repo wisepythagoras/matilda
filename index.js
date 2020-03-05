@@ -121,13 +121,16 @@ const bboxToBounds = (bbox, zoom) => {
 
 /**
  * Gets a single tile.
- * @param {string} url The tile server url.
+ * @param {string} templateUrl The tile server url.
  * @param {string} output The output directory location.
  * @param {Coords} coords The coordinates.
  * @param {Function} callback The callback function.
  * @param {boolean} verbose Self explanatory.
  */
-const getTile = (url, output, coords, callback, verbose = false) => {
+const getTile = (templateUrl, output, coords, callback, verbose = false) => {
+    // Create the damn URL.
+    const url = templateToUrl(templateUrl, coords);
+
     // Create the path.
     let path = `${output}/${coords.z}`;
 
@@ -149,6 +152,10 @@ const getTile = (url, output, coords, callback, verbose = false) => {
 
     // Check for the image, and if it doesn't exist, create it.
     if (fs.existsSync(image)) {
+        if (verbose) {
+            console.log(` HAS: ${url}`);
+        }
+
         return callback(null);
     }
 
@@ -194,16 +201,13 @@ const getTiles = (options, callback) => {
     coords.x = bounds.west;
     coords.y = bounds.south;
 
-    // Get the URL.
-    const url = templateToUrl(options.url, coords);
-
     // Check if the output directory exists. If it doesn't, create it.
     if (!createDir(options.output)) {
         return callback(pathError(options.output));
     }
 
     if (!!options.verbose) {
-        console.log(`Server: ${url}`);
+        console.log(`Server: ${options.url}`);
     }
 
     /**
@@ -222,8 +226,8 @@ const getTiles = (options, callback) => {
 
         // We scan from north to south. Every time we finish with a row, we move to
         // the next row (or Y line).
-        if (coords.y <= bounds.north && coords.y >= bounds.south) {
-            getTile(url, options.output, coords, tileGetCallback, options.verbose);
+        if (coords.y <= bounds.north) {
+            getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
             return;
         }
 
@@ -236,7 +240,7 @@ const getTiles = (options, callback) => {
         // Move to the next column and as long as it's within the selected bounds, we
         // get that tile.
         if (coords.x <= bounds.east) {
-            getTile(url, options.output, coords, tileGetCallback, options.verbose);
+            getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
             return;
         }
 
@@ -250,7 +254,7 @@ const getTiles = (options, callback) => {
         // Move one level down. Which means that we zoom in and then download all the
         // tiles in there.
         if (coords.z <= options.zoom.max) {
-            return getTile(url, options.output, coords, tileGetCallback, options.verbose);
+            return getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
         }
 
         if (!!options.verbose) {
@@ -259,7 +263,7 @@ const getTiles = (options, callback) => {
     };
 
     // Start fetching the tiles.
-    getTile(url, options.output, coords, tileGetCallback, options.verbose);
+    getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
 };
 
 module.exports.lngToTile = lngToTile;
