@@ -199,7 +199,7 @@ const getTiles = (options, callback) => {
 
     // Fill out the rest of the coordinates.
     coords.x = bounds.west;
-    coords.y = bounds.south;
+    coords.y = bounds.north;
 
     // Check if the output directory exists. If it doesn't, create it.
     if (!createDir(options.output)) {
@@ -226,7 +226,7 @@ const getTiles = (options, callback) => {
 
         // We scan from north to south. Every time we finish with a row, we move to
         // the next row (or Y line).
-        if (coords.y <= bounds.north) {
+        if (coords.y <= bounds.south) {
             getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
             return;
         }
@@ -235,7 +235,7 @@ const getTiles = (options, callback) => {
         coords.x++;
 
         // Reset the Y coords.
-        coords.y = bounds.south;
+        coords.y = bounds.north;
 
         // Move to the next column and as long as it's within the selected bounds, we
         // get that tile.
@@ -249,7 +249,7 @@ const getTiles = (options, callback) => {
 
         // Set the coords again.
         coords.x = bounds.west;
-        coords.y = bounds.south;
+        coords.y = bounds.north;
 
         // Move one level down. Which means that we zoom in and then download all the
         // tiles in there.
