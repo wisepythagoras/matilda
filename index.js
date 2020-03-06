@@ -1,5 +1,6 @@
 const fs = require('fs');
-const request = require('request');
+const crypto = require('crypto');
+const axios = require('axios');
 
 /**
  * The object that defines the coordinates. It contains a zoom an x and a y.
@@ -33,6 +34,17 @@ const request = require('request');
  *     verbose: boolean,
  * }} Options
  */
+
+/**
+ * Get the SHA1 hash of a string.
+ * @param {string} str The string to hash.
+ * @returns {string} The hex hash.
+ */
+const getSHA1 = str => {
+    const shasum = crypto.createHash('sha1');
+    shasum.update(str);
+    return shasum.digest('hex');
+}
 
 /**
  * Convert a template URL to an actual working URL.
@@ -163,21 +175,16 @@ const getTile = (templateUrl, output, coords, callback, verbose = false) => {
         console.log(` GET: ${url}`);
     }
 
-    // Create a write stream.
-    const stream = fs.createWriteStream(image);
-
-    // Handle any errors.
-    stream.on('error', err => {
-        if (verbose) {
-            console.log(err);
-        }
-    });
-
-    // Return to the caller when this finishes.
-    stream.on('finish', callback);
-
-    // Initiate the request.
-    request(url).pipe(stream);
+    // Fetch the image.
+    axios({
+        method: 'get',
+        url,
+        responseType: 'stream'
+    })
+    .then(res => {
+        res.data.pipe(fs.createWriteStream(image));
+    })
+    .finally(() => callback());
 };
 
 /**
