@@ -2,6 +2,9 @@ const fs = require('fs');
 const crypto = require('crypto');
 const axios = require('axios');
 
+// Define the valid tile image formats.
+const VALID_FORMATS = ['png', 'jpg', 'jpeg'];
+
 /**
  * The object that defines the coordinates. It contains a zoom an x and a y.
  * @typedef {{
@@ -32,6 +35,7 @@ const axios = require('axios');
  *         max: number,
  *     },
  *     verbose: boolean,
+ *     format: 'png'|'jpeg'|'jpeg',
  * }} Options
  */
 
@@ -138,8 +142,16 @@ const bboxToBounds = (bbox, zoom) => {
  * @param {Coords} coords The coordinates.
  * @param {Function} callback The callback function.
  * @param {boolean} verbose Self explanatory.
+ * @param {'png'|'jpeg'|'jpeg'} format The format of the image.
  */
-const getTile = (templateUrl, output, coords, callback, verbose = false) => {
+const getTile = (
+    templateUrl,
+    output,
+    coords,
+    callback,
+    verbose = false,
+    format = 'png'
+) => {
     // Create the damn URL.
     const url = templateToUrl(templateUrl, coords);
 
@@ -204,6 +216,10 @@ const getTiles = (options, callback) => {
     // Get the bounds.
     let bounds = bboxToBounds(options.bbox, coords.z);
 
+    // The format of the output tiles.
+    const format = !!~VALID_FORMATS.indexOf(options.format) ?
+        options.format : 'png';
+
     // Fill out the rest of the coordinates.
     coords.x = bounds.west;
     coords.y = bounds.north;
@@ -234,8 +250,14 @@ const getTiles = (options, callback) => {
         // We scan from north to south. Every time we finish with a row, we move to
         // the next row (or Y line).
         if (coords.y <= bounds.south) {
-            getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
-            return;
+            return getTile(
+                options.url,
+                options.output,
+                coords,
+                tileGetCallback,
+                options.verbose,
+                format
+            );
         }
 
         // Increment the X coords.
@@ -247,8 +269,14 @@ const getTiles = (options, callback) => {
         // Move to the next column and as long as it's within the selected bounds, we
         // get that tile.
         if (coords.x <= bounds.east) {
-            getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
-            return;
+            return getTile(
+                options.url,
+                options.output,
+                coords,
+                tileGetCallback,
+                options.verbose,
+                format
+            );
         }
 
         // Increment the zoom level and recalculate the bounds.
@@ -261,7 +289,14 @@ const getTiles = (options, callback) => {
         // Move one level down. Which means that we zoom in and then download all the
         // tiles in there.
         if (coords.z <= options.zoom.max) {
-            return getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
+            return getTile(
+                options.url,
+                options.output,
+                coords,
+                tileGetCallback,
+                options.verbose,
+                format
+            );
         }
 
         if (!!options.verbose) {
@@ -270,7 +305,14 @@ const getTiles = (options, callback) => {
     };
 
     // Start fetching the tiles.
-    getTile(options.url, options.output, coords, tileGetCallback, options.verbose);
+    getTile(
+        options.url,
+        options.output,
+        coords,
+        tileGetCallback,
+        options.verbose,
+        format
+    );
 };
 
 module.exports.lngToTile = lngToTile;

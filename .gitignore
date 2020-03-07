@@ -107,3 +107,7 @@ dist
 index.html
 ./tiles
 .vscode
+
+# Local files and folders
+tiles
+sat-tiles
