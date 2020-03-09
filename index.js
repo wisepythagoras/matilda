@@ -1,4 +1,6 @@
 const fs = require('fs');
+const cluster = require("cluster");
+const numCPUs = require("os").cpus().length;
 const crypto = require('crypto');
 const axios = require('axios');
 
@@ -37,6 +39,18 @@ const VALID_FORMATS = ['png', 'jpg', 'jpeg'];
  *     verbose: boolean,
  *     format: 'png'|'jpeg'|'jpeg',
  * }} Options
+ */
+
+/**
+ * The job type.
+ * @typedef {{
+ *     url: string,
+ *     output: string,
+ *     verbose: boolean,
+ *     coords: Coords,
+ *     format: 'png'|'jpeg'|'jpeg',
+ *     worker: number,
+ * }} Job
  */
 
 /**
@@ -172,7 +186,7 @@ const getTile = (
     }
 
     // Compose the path of the image.
-    const image = `${path}/${coords.y}.png`;
+    const image = `${path}/${coords.y}.${format}`;
 
     // Check for the image, and if it doesn't exist, create it.
     if (fs.existsSync(image)) {
@@ -197,6 +211,9 @@ const getTile = (
         res.data.pipe(fs.createWriteStream(image));
     })
     .finally(() => callback());
+
+    // Return the url.
+    return url;
 };
 
 /**
@@ -205,6 +222,9 @@ const getTile = (
  * @param {Function} callback The callback function.
  */
 const getTiles = (options, callback) => {
+    // This will give us some cool metrics at the end.
+    const hrstart = process.hrtime();
+
     let count = 0;
 
     // This will hold all of the coordinate information.
@@ -216,32 +236,24 @@ const getTiles = (options, callback) => {
     // Get the bounds.
     let bounds = bboxToBounds(options.bbox, coords.z);
 
-    // The format of the output tiles.
-    const format = !!~VALID_FORMATS.indexOf(options.format) ?
-        options.format : 'png';
-
     // Fill out the rest of the coordinates.
     coords.x = bounds.west;
     coords.y = bounds.north;
 
-    // Check if the output directory exists. If it doesn't, create it.
-    if (!createDir(options.output)) {
-        return callback(pathError(options.output));
-    }
-
-    if (!!options.verbose) {
-        console.log(`Server: ${options.url}`);
-    }
+    // The format of the output tiles.
+    const format = !!~VALID_FORMATS.indexOf(options.format) ?
+        options.format : 'png';
 
     /**
-     * The callback for the tile getter.
-     * @param {Error} err An error.
+     * Gets the next job.
+     * @returns {Job}
      */
-    const tileGetCallback = err => {
-        if (err) {
-            return callback(err);
+    const getNextJob = () => {
+        if (coords.z > options.zoom.max)  {
+            return;
         }
 
+        // Increment the count.
         count++;
 
         // Increment the Y coords.
@@ -250,14 +262,13 @@ const getTiles = (options, callback) => {
         // We scan from north to south. Every time we finish with a row, we move to
         // the next row (or Y line).
         if (coords.y <= bounds.south) {
-            return getTile(
-                options.url,
-                options.output,
+            return {
+                url: options.url,
+                output: options.output,
+                verbose: options.verbose,
                 coords,
-                tileGetCallback,
-                options.verbose,
-                format
-            );
+                format,
+            };
         }
 
         // Increment the X coords.
@@ -269,14 +280,13 @@ const getTiles = (options, callback) => {
         // Move to the next column and as long as it's within the selected bounds, we
         // get that tile.
         if (coords.x <= bounds.east) {
-            return getTile(
-                options.url,
-                options.output,
+            return {
+                url: options.url,
+                output: options.output,
+                verbose: options.verbose,
                 coords,
-                tileGetCallback,
-                options.verbose,
-                format
-            );
+                format,
+            };
         }
 
         // Increment the zoom level and recalculate the bounds.
@@ -289,30 +299,119 @@ const getTiles = (options, callback) => {
         // Move one level down. Which means that we zoom in and then download all the
         // tiles in there.
         if (coords.z <= options.zoom.max) {
-            return getTile(
-                options.url,
-                options.output,
+            return {
+                url: options.url,
+                output: options.output,
+                verbose: options.verbose,
                 coords,
-                tileGetCallback,
-                options.verbose,
-                format
-            );
-        }
-
-        if (!!options.verbose) {
-            console.log(`Downloaded ${count} tiles.`);
+                format,
+            };
         }
     };
 
-    // Start fetching the tiles.
-    getTile(
-        options.url,
-        options.output,
-        coords,
-        tileGetCallback,
-        options.verbose,
-        format
-    );
+    // Check if the output directory exists. If it doesn't, create it.
+    if (!createDir(options.output)) {
+        return callback(pathError(options.output));
+    }
+
+    if (cluster.isMaster) {
+        let stopped = 0;
+
+        /**
+         * Stop all child processes.
+         */
+        const stopChildProcesses = () => {
+            stopped++;
+
+            if (stopped < numCPUs) {
+                return;
+            }
+
+            // Terminate all child processes.
+            for (const id in cluster.workers) {
+                cluster.workers[id].kill();
+            }
+
+            if (!!options.verbose) {
+                console.log(`Downloaded ${count} tiles.`);
+            }
+
+            callback();
+        };
+    
+        // Create a few processes so that we can start downloading our tiles in
+        // parallel.
+        for (let i = 0; i < numCPUs; i++) {
+            cluster.fork();
+        }
+
+        for (const id in cluster.workers) {
+            let worker = cluster.workers[id];
+
+            // Listen for messages.
+            (worker => {
+                worker.on('message', msg => {
+                    if (!!msg.success) {
+                        console.log(' ', msg.err);
+                    }
+
+                    // Get the next job.
+                    const nextJob = getNextJob();
+
+                    if (nextJob) {
+                        // If there was a next job, then send it to the next job.
+                        return worker.send(nextJob);
+                    }
+
+                    // We're at the end and we need to stop all processes.
+                    stopChildProcesses();
+                });
+            })(worker);
+
+            // Send the new worker a job.
+            cluster.workers[id].send({
+                url: options.url,
+                output: options.output,
+                verbose: options.verbose,
+                coords,
+                format,
+                worker: id,
+            });
+        }
+
+        cluster.on("exit", (worker, code, signal) => {
+            // Show some message about the workers?
+        });
+    } else {
+        // Handle any incoming messages to the child process.
+        process.on('message', msg => {
+            /**
+             * Define the callback.
+             * @param {any} err If there was any error.
+             */
+            const callback = err => {
+                // Compose the message.
+                const message = {
+                    url: msg.url,
+                    success: !!err,
+                    err,
+                };
+
+                // Send the message back.
+                process.send(message);
+            };
+
+            // Get the tile.
+            getTile(
+                msg.url,
+                msg.output,
+                msg.coords,
+                callback,
+                msg.coords,
+                msg.format
+            );
+        });
+    }
 };
 
 module.exports.lngToTile = lngToTile;
