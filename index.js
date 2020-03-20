@@ -1,6 +1,6 @@
 const fs = require('fs');
 const cluster = require("cluster");
-const numCPUs = require("os").cpus().length;
+const numCPUs = require("os").cpus().length || 1;
 const crypto = require('crypto');
 const axios = require('axios');
 
@@ -338,7 +338,7 @@ const getTiles = (options, callback) => {
 
             callback();
         };
-    
+
         // Create a few processes so that we can start downloading our tiles in
         // parallel.
         for (let i = 0; i < numCPUs; i++) {
