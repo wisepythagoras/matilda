@@ -36,6 +36,7 @@ const VALID_FORMATS = ['png', 'jpg', 'jpeg'];
  *         min: number,
  *         max: number,
  *     },
+ *     referrer: string,
  *     verbose: boolean,
  *     format: 'png'|'jpeg'|'jpeg',
  * }} Options
@@ -154,6 +155,7 @@ const bboxToBounds = (bbox, zoom) => {
  * @param {string} templateUrl The tile server url.
  * @param {string} output The output directory location.
  * @param {Coords} coords The coordinates.
+ * @param {string} referrer The referrer, if there is one.
  * @param {Function} callback The callback function.
  * @param {boolean} verbose Self explanatory.
  * @param {'png'|'jpeg'|'jpeg'} format The format of the image.
@@ -162,6 +164,7 @@ const getTile = (
     templateUrl,
     output,
     coords,
+    referrer,
     callback,
     verbose = false,
     format = 'png'
@@ -205,7 +208,10 @@ const getTile = (
     axios({
         method: 'get',
         url,
-        responseType: 'stream'
+        responseType: 'stream',
+        headers: {
+            'Referer': referrer,
+        },
     })
     .then(res => {
         res.data.pipe(fs.createWriteStream(image));
@@ -266,6 +272,7 @@ const getTiles = (options, callback) => {
                 url: options.url,
                 output: options.output,
                 verbose: options.verbose,
+                referrer: !!options.referrer ? options.referrer : null,
                 coords,
                 format,
             };
@@ -284,6 +291,7 @@ const getTiles = (options, callback) => {
                 url: options.url,
                 output: options.output,
                 verbose: options.verbose,
+                referrer: !!options.referrer ? options.referrer : null,
                 coords,
                 format,
             };
@@ -303,6 +311,7 @@ const getTiles = (options, callback) => {
                 url: options.url,
                 output: options.output,
                 verbose: options.verbose,
+                referrer: !!options.referrer ? options.referrer : null,
                 coords,
                 format,
             };
@@ -373,6 +382,7 @@ const getTiles = (options, callback) => {
                 url: options.url,
                 output: options.output,
                 verbose: options.verbose,
+                referrer: !!options.referrer ? options.referrer : null,
                 coords,
                 format,
                 worker: id,
@@ -406,6 +416,7 @@ const getTiles = (options, callback) => {
                 msg.url,
                 msg.output,
                 msg.coords,
+                msg.referrer,
                 callback,
                 msg.coords,
                 msg.format
