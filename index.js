@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 
 // Define the valid tile image formats.
-const VALID_FORMATS = ['png', 'jpg', 'jpeg'];
+const VALID_FORMATS = ['png', 'jpg', 'jpeg', 'mvt', 'topojson'];
 
 /**
  * The object that defines the coordinates. It contains a zoom an x and a y.
@@ -49,7 +49,7 @@ const VALID_FORMATS = ['png', 'jpg', 'jpeg'];
  *     output: string,
  *     verbose: boolean,
  *     coords: Coords,
- *     format: 'png'|'jpeg'|'jpeg',
+ *     format: 'png'|'jpeg'|'jpeg'|'mvt'|'topojson',
  *     worker: number,
  * }} Job
  */
